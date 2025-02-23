@@ -1,0 +1,10 @@
+# 忽略 .env 文件
+.env
+env-file.txt
+
+# 忽略其他不需要的文件
+/vendor/
+/node_modules/
+*.log
+*.exe
+*.out
