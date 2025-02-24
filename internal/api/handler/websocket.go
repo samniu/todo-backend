@@ -29,7 +29,7 @@ type Claims struct {
 }
 
 // 定义用于签名的密钥
-var jwtKey = []byte("your_secret_key") // 替换为你的实际密钥
+var jwtKey = []byte("todo_app_secret_key_123") // 替换为你的实际密钥
 
 func HandleWebSocket(c *gin.Context) {
 	// 升级为 WebSocket 连接

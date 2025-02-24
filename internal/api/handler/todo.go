@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 
@@ -13,6 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// 统一的响应结构
+type Response struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
 // CreateTodo 创建待办事项
 func CreateTodo(c *gin.Context) {
 	userID, _ := c.Get("userID")
@@ -22,7 +27,7 @@ func CreateTodo(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// 确保 DueDate 是有效的 RFC3339 格式
+
 	if input.DueDate.IsZero() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid due date"})
 		return
@@ -32,7 +37,7 @@ func CreateTodo(c *gin.Context) {
 		UserID:      userID.(uint),
 		Title:       input.Title,
 		Description: input.Description,
-		DueDate:     input.DueDate, // 直接存储指针，支持 null
+		DueDate:     input.DueDate,
 		RepeatType:  input.RepeatType,
 		Note:        input.Note,
 		IsCompleted: false,
@@ -44,18 +49,20 @@ func CreateTodo(c *gin.Context) {
 		return
 	}
 
+	response := Response{
+		Type: "todo_created",
+		Data: todo,
+	}
+
 	// 发送 WebSocket 通知
-	notification, _ := json.Marshal(map[string]interface{}{
-		"type": "todo_created",
-		"data": todo,
-	})
+	notification, _ := json.Marshal(response)
 	if clients, ok := ws.Manager.Clients[userID.(uint)]; ok {
 		for client := range clients {
 			client.Send <- notification
 		}
 	}
 
-	c.JSON(http.StatusCreated, todo)
+	c.JSON(http.StatusCreated, response)
 }
 
 // UpdateTodo 更新待办事项
@@ -64,22 +71,18 @@ func UpdateTodo(c *gin.Context) {
 	todoID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid todo ID"})
-		log.Println("Invalid todo ID")
 		return
 	}
 
 	var todo model.Todo
 	if err := db.DB.Where("id = ? AND user_id = ?", todoID, userID).First(&todo).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
-		log.Println("Todo not found")
 		return
 	}
 
 	var input model.TodoCreate
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		log.Printf("Error binding JSON: %v", err) // 打印错误信息
-		log.Printf("Received input: %+v", input)  // 打印输入数据
 		return
 	}
 
@@ -94,18 +97,20 @@ func UpdateTodo(c *gin.Context) {
 		return
 	}
 
+	response := Response{
+		Type: "todo_updated",
+		Data: todo,
+	}
+
 	// 发送 WebSocket 通知
-	notification, _ := json.Marshal(map[string]interface{}{
-		"type": "todo_updated",
-		"data": todo,
-	})
+	notification, _ := json.Marshal(response)
 	if clients, ok := ws.Manager.Clients[userID.(uint)]; ok {
 		for client := range clients {
 			client.Send <- notification
 		}
 	}
 
-	c.JSON(http.StatusOK, todo)
+	c.JSON(http.StatusOK, response)
 }
 
 // DeleteTodo 删除待办事项
@@ -128,31 +133,21 @@ func DeleteTodo(c *gin.Context) {
 		return
 	}
 
+	// 统一返回完整的todo对象
+	response := Response{
+		Type: "todo_deleted",
+		Data: todo,
+	}
+
 	// 发送 WebSocket 通知
-	notification, _ := json.Marshal(map[string]interface{}{
-		"type": "todo_deleted",
-		"data": map[string]interface{}{
-			"id":      todo.ID,
-			"user_id": todo.UserID,
-		},
-	})
+	notification, _ := json.Marshal(response)
 	if clients, ok := ws.Manager.Clients[userID.(uint)]; ok {
 		for client := range clients {
 			client.Send <- notification
 		}
 	}
 
-	// 返回被删除的 todo 信息
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Todo deleted successfully",
-		"todo": gin.H{
-			"id":         todo.ID,
-			"user_id":    todo.UserID,
-			"title":      todo.Title,
-			"created_at": todo.CreatedAt,
-			"updated_at": todo.UpdatedAt,
-		},
-	})
+	c.JSON(http.StatusOK, response)
 }
 
 // ToggleTodo 切换待办事项的完成状态
@@ -170,25 +165,28 @@ func ToggleTodo(c *gin.Context) {
 		return
 	}
 
-	todo.IsCompleted = !todo.IsCompleted // 修改字段名
+	todo.IsCompleted = !todo.IsCompleted
 
 	if err := db.DB.Save(&todo).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update todo"})
 		return
 	}
 
+	// 使用 todo_updated 类型统一更新操作
+	response := Response{
+		Type: "todo_updated",
+		Data: todo,
+	}
+
 	// 发送 WebSocket 通知
-	notification, _ := json.Marshal(map[string]interface{}{
-		"type": "todo_toggled",
-		"data": todo,
-	})
+	notification, _ := json.Marshal(response)
 	if clients, ok := ws.Manager.Clients[userID.(uint)]; ok {
 		for client := range clients {
 			client.Send <- notification
 		}
 	}
 
-	c.JSON(http.StatusOK, todo)
+	c.JSON(http.StatusOK, response)
 }
 
 // GetTodos 获取当前用户的所有待办事项
@@ -201,5 +199,10 @@ func GetTodos(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, todos)
+	response := Response{
+		Type: "todos_list",
+		Data: todos,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
