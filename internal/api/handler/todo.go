@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -28,12 +29,45 @@ func CreateTodo(c *gin.Context) {
 		return
 	}
 
-	if input.DueDate.IsZero() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid due date"})
-		return
+	// 检查是否存在 localID
+	var todo model.Todo
+	if input.LocalID != "" {
+		// 如果存在 localID，尝试查找并更新任务
+		if err := db.DB.Where("local_id = ? AND user_id = ?", input.LocalID, userID).First(&todo).Error; err == nil {
+			// 更新任务
+			todo.Title = input.Title
+			todo.Description = input.Description
+			todo.DueDate = input.DueDate
+			todo.RepeatType = input.RepeatType
+			todo.Note = input.Note
+			todo.IsCompleted = false
+			todo.IsFavorite = false
+
+			if err := db.DB.Save(&todo).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update todo"})
+				return
+			}
+
+			response := Response{
+				Type: "todo_updated",
+				Data: todo,
+			}
+
+			// 发送 WebSocket 通知
+			notification, _ := json.Marshal(response)
+			if clients, ok := ws.Manager.Clients[userID.(uint)]; ok {
+				for client := range clients {
+					client.Send <- notification
+				}
+			}
+
+			c.JSON(http.StatusOK, response)
+			return
+		}
 	}
 
-	todo := model.Todo{
+	// 如果不存在 localID 或未找到任务，则创建新任务
+	todo = model.Todo{
 		UserID:      userID.(uint),
 		Title:       input.Title,
 		Description: input.Description,
@@ -42,6 +76,7 @@ func CreateTodo(c *gin.Context) {
 		Note:        input.Note,
 		IsCompleted: false,
 		IsFavorite:  false,
+		LocalID:     input.LocalID, // 保存 localID
 	}
 
 	if err := db.DB.Create(&todo).Error; err != nil {
@@ -91,6 +126,7 @@ func UpdateTodo(c *gin.Context) {
 	todo.DueDate = input.DueDate
 	todo.RepeatType = input.RepeatType
 	todo.Note = input.Note
+	todo.LocalID = input.LocalID // 更新 localID
 
 	if err := db.DB.Save(&todo).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update todo"})
@@ -118,6 +154,7 @@ func DeleteTodo(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	todoID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
+		log.Println("DeleteTodo Invalid todo ID: %ld", todoID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid todo ID"})
 		return
 	}

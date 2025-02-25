@@ -6,6 +6,7 @@ import (
 
 type Todo struct {
 	ID          uint       `gorm:"primarykey" json:"id"`
+	LocalID     string     `json:"local_id"` // 本地ID
 	UserID      uint       `json:"user_id"`
 	Title       string     `json:"title" binding:"required"`
 	Description string     `json:"description"`
@@ -26,4 +27,5 @@ type TodoCreate struct {
 	DueDate     *time.Time `json:"due_date"` // 改成指针类型
 	RepeatType  string     `json:"repeat_type"`
 	Note        string     `json:"note"`
+	LocalID     string     `json:"local_id"` // 添加 LocalID 字段
 }
